@@ -228,7 +228,7 @@ class DocxTemplate(object):
 
         return src_xml
 
-    def render_xml_part(self, src_xml, part, context, jinja_env=None):
+    async def render_xml_part(self, src_xml, part, context, jinja_env=None):
         src_xml = re.sub(r'<w:p([ >])', r'\n<w:p\1', src_xml)
         try:
             self.current_rendering_part = part
@@ -236,7 +236,7 @@ class DocxTemplate(object):
                 template = jinja_env.from_string(src_xml)
             else:
                 template = Template(src_xml)
-            dst_xml = template.render(context)
+            dst_xml = await template.render_async(context)
         except TemplateError as exc:
             if hasattr(exc, 'lineno') and exc.lineno is not None:
                 line_number = max(exc.lineno - 4, 0)
@@ -309,10 +309,10 @@ class DocxTemplate(object):
 
         return xml
 
-    def build_xml(self, context, jinja_env=None):
+    async def build_xml(self, context, jinja_env=None):
         xml = self.get_xml()
         xml = self.patch_xml(xml)
-        xml = self.render_xml_part(xml, self.docx._part, context, jinja_env)
+        xml = await self.render_xml_part(xml, self.docx._part, context, jinja_env)
         return xml
 
     def map_tree(self, tree):
@@ -334,12 +334,12 @@ class DocxTemplate(object):
             return m.group(1)
         return 'utf-8'
 
-    def build_headers_footers_xml(self, context, uri, jinja_env=None):
+    async def build_headers_footers_xml(self, context, uri, jinja_env=None):
         for relKey, part in self.get_headers_footers(uri):
             xml = self.get_part_xml(part)
             encoding = self.get_headers_footers_encoding(xml)
             xml = self.patch_xml(xml)
-            xml = self.render_xml_part(xml, part, context, jinja_env)
+            xml = await self.render_xml_part(xml, part, context, jinja_env)
             yield relKey, xml.encode(encoding)
 
     def map_headers_footers_xml(self, relKey, xml):
@@ -349,7 +349,7 @@ class DocxTemplate(object):
             new_part.load_rel(rel.reltype, rel._target, rel.rId, rel.is_external)
         self.docx._part._rels[relKey]._target = new_part
 
-    def render(
+    async def render(
         self,
         context: Dict[str, Any],
         jinja_env: Optional[Environment] = None,
@@ -365,7 +365,7 @@ class DocxTemplate(object):
                 jinja_env.autoescape = autoescape
 
         # Body
-        xml_src = self.build_xml(context, jinja_env)
+        xml_src = await self.build_xml(context, jinja_env)
 
         # fix tables if needed
         tree = self.fix_tables(xml_src)
@@ -379,13 +379,13 @@ class DocxTemplate(object):
         # Headers
         headers = self.build_headers_footers_xml(context, self.HEADER_URI,
                                                  jinja_env)
-        for relKey, xml in headers:
+        async for relKey, xml in headers:
             self.map_headers_footers_xml(relKey, xml)
 
         # Footers
         footers = self.build_headers_footers_xml(context, self.FOOTER_URI,
                                                  jinja_env)
-        for relKey, xml in footers:
+        async for relKey, xml in footers:
             self.map_headers_footers_xml(relKey, xml)
 
         self.render_properties(context, jinja_env)
